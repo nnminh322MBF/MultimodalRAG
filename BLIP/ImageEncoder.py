@@ -2,116 +2,82 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from components import Block
 
-
-class DropPath(nn.Module):
-    def __init__(self, drop_prob: float = 0):
-        super().__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self, x: torch.Tensor):
-        if self.drop_prob == 0 or not self.training:
-            return x
-        keep_prob = 1 - self.drop_prob
-        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-        random_tensor = keep_prob + torch.rand(
-            size=shape, dtype=x.dtype, device=x.device
-        )
-        random_tensor = torch.floor_(random_tensor)
-
-        return x.div(keep_prob) * random_tensor
-
-
-class MLP(nn.Module):
-    def __init__(
-        self, in_features, hidden_features=None, out_features=None, drop_out=0.0
-    ):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features=in_features, out_features=hidden_features)
-        self.act = nn.GELU()
-        self.fc2 = nn.Linear(in_features=hidden_features, out_features=out_features)
-        self.drop_out = nn.Dropout(p=drop_out)
-
-    def forward(self, x: torch.Tensor):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop_out(x)
-        x = self.fc2(x)
-        x = self.drop_out(x)
-        return x
-
-
-class Attention(nn.Module):
-    def __init__(
-        self, dim, num_heads, qkv_bias=False, attn_dropout=0.0, prj_dropout=0.0
-    ):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim**-0.5
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_dropout)
-        self.prj = nn.Linear(dim, dim)
-        self.prj_drop = nn.Dropout(prj_dropout)
-
-    def forward(self, x: torch.Tensor):
-        B, N, C = x.shape
-        qkv: torch.Tensor = self.qkv(x)
-        qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(
-            2, 0, 3, 1, 4
-        )
-        q, k, v = qkv[0], qkv[1], qkv[2]
-
-        attn: torch.Tensor = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-
-        x = (
-            (attn @ v).transpose(1, 2).reshape(B, N, C)
-        )  # [Batch_size, N, num_heads, d_k]
-        x = self.attn_drop(x)
-
-        x = self.prj(x)
-        x = self.prj_drop(x)
-
-        return x
-
-
-class Block(nn.Module):
-    def __init__(
-        self,
-        dim,
-        num_heads,
-        mlp_ratio=4.0,
-        qkv_bias=False,
-        attn_dropout=0.0,
-        dropout=0.0,
-        drop_path=0.0,
-    ):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = Attention(
-            dim=dim,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            attn_dropout=attn_dropout,
-            prj_dropout=dropout,
-        )
-
-        self.norm2 = nn.LayerNorm(dim)
-        self.drop_path = (
-            DropPath(drop_prob=drop_path) if drop_path > 0 else nn.Identity()
-        )
-        hidden_dim = int(mlp_ratio * dim)
-        self.mlp = MLP(in_features=dim, hidden_features=hidden_dim, drop_out=dropout)
-
-    def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-        return x
-    
 
 class ImageEncoder(nn.Module):
-    def __init__(self, image_size=224, patch_size=16 ):
+    def __init__(
+        self,
+        image_size: int = 224,
+        patch_size: int = 16,
+        embed_dim: int = 768,
+        depth: int = 12,
+        num_heads: int = 12,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        drop_rate: float = 0.0,
+        attn_drop_rate: float = 0.0,
+        drop_path_rate: float = 0.0,
+    ):
+        super().__init__()
 
+        assert (
+            image_size % patch_size == 0
+        ), "Image dimentions must be divisible by patch size"
+        num_patches = (image_size // patch_size) ** 2
+        self.patch_embed = nn.Conv2d(
+            3, embed_dim, stride=patch_size, kernel_size=patch_size
+        )
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_drop = nn.Dropout(drop_rate)
+        drp = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+        self.blocks = nn.ModuleList(
+            [
+                Block(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    attn_dropout=attn_drop_rate,
+                    dropout=drop_rate,
+                    drop_path=drp[i],
+                )
+                for i in range(depth)
+            ]
+        )
+        self.norm = nn.LayerNorm(embed_dim)
+
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.zeros_(m.bias)
+            nn.init.ones_(m.weight)
+
+    def forward(self, x: torch.Tensor):
+        """
+        x: (B, 3, H, W)
+        returns: (B, num_patches+1, embed_dim)  — đầu tiên là CLS token
+        """
+        B = x.shape[0]
+        x = self.patch_embed(x)  # [B, embed_dim, H/ph, W/pw]
+        x = x.flatten(2).transpose(1, 2)  # [B, C, embed_dim]
+        self.cls_token = self.cls_token.expand(B, -1, -1)
+
+        x = torch.concatenate([self.cls_token, x], dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
+
+        for blk in self.blocks:
+            x = blk(x)
+
+        x = self.norm(x)
+
+        return x
