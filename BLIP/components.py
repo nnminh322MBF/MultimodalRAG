@@ -56,7 +56,7 @@ class SelfAttention(nn.Module):
         self.prj = nn.Linear(dim, dim)
         self.prj_drop = nn.Dropout(prj_dropout)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, attn_mask: torch.tensor = None):
         B, N, C = x.shape
         qkv: torch.Tensor = self.qkv(x)
         qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(
@@ -65,6 +65,10 @@ class SelfAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         attn: torch.Tensor = (q @ k.transpose(-2, -1)) * self.scale
+
+        if attn_mask is not None:
+            attn = attn + attn_mask
+
         attn = attn.softmax(dim=-1)
 
         x = (
@@ -121,7 +125,7 @@ class CrossAttention(nn.Module):
         return x
 
 
-class Block(nn.Module):
+class EncoderBlock(nn.Module):
     def __init__(
         self,
         dim,

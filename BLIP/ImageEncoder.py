@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from components import Block
+from components import EncoderBlock
 
 
 class ImageEncoder(nn.Module):
@@ -34,7 +34,7 @@ class ImageEncoder(nn.Module):
         drp = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         self.blocks = nn.ModuleList(
             [
-                Block(
+                EncoderBlock(
                     dim=embed_dim,
                     num_heads=num_heads,
                     mlp_ratio=mlp_ratio,

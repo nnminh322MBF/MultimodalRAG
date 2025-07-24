@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from components import Block
+from components import EncoderBlock
 
 
 class TextEncoder(nn.Module):
@@ -17,14 +17,14 @@ class TextEncoder(nn.Module):
         drop_path_rate: float = 0.0,
     ):
         super().__init__()
-        self.token_embed = nn.Linear(vocab_size, embed_dim)
-        self.pos_embed = nn.Parameter(torch.zeros(1, max_len, embed_dim))
+        self.word_embeddings = nn.Parameter(vocab_size, embed_dim)
+        self.position_embeddings = nn.Parameter(torch.zeros(1, max_len, embed_dim))
         self.drop = nn.Dropout(drop_rate)
 
         stochastic_drop_path = torch.linspace(0, drop_path_rate, depth)
         self.blocks = nn.ModuleList(
             [
-                Block(
+                EncoderBlock(
                     dim=embed_dim,
                     num_heads=num_heads,
                     mlp_ratio=mlp_ratio,
@@ -39,13 +39,13 @@ class TextEncoder(nn.Module):
         self.norm = nn.LayerNorm(embed_dim)
         self.max_len = max_len
 
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        nn.init.trunc_normal_(self.position_embeddings, std=0.02)
 
     def forward(self, token_ids: torch.Tensor):
         _, seq_len = token_ids.shape
-        pos = self.pos_embed[:, :seq_len]
-        token_embed = self.token_embed(token_ids) + pos
-        x = self.drop(token_embed)
+        pos = self.position_embeddings[:, :seq_len, :]
+        word_embed = self.word_embeddings(token_ids) + pos
+        x = self.drop(word_embed)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
