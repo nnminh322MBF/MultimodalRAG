@@ -67,19 +67,27 @@ class SelfAttention(nn.Module):
         attn: torch.Tensor = (q @ k.transpose(-2, -1)) * self.scale
 
         if attn_mask is not None:
-            attn = attn + attn_mask
+            attn = attn.masked_fill(attn_mask == 0, float("-inf"))
 
         attn = attn.softmax(dim=-1)
+
+        x = self.attn_drop(x)
 
         x = (
             (attn @ v).transpose(1, 2).reshape(B, N, C)
         )  # [Batch_size, N, num_heads, d_k]
-        x = self.attn_drop(x)
 
         x = self.prj(x)
         x = self.prj_drop(x)
 
         return x
+
+
+class CausualAttention(SelfAttention):
+    def forward(self, x, attn_mask=None):
+        B, N, C = x.shape
+        causual_mask = torch.tril(torch.ones(N, N, dtype=x.dtype, device=x.device))
+        return super().forward(x, causual_mask)
 
 
 class CrossAttention(nn.Module):
@@ -95,7 +103,9 @@ class CrossAttention(nn.Module):
         self.prj = nn.Linear(dim, dim)
         self.prj_drop = nn.Dropout(prj_drop)
 
-    def forward(self, a_feature: torch.Tensor, b_feature: torch.Tensor):
+    def forward(
+        self, a_feature: torch.Tensor, b_feature: torch.Tensor, cross_attn_mask=None
+    ):
         """
         input:
         - a_feature: image_feature
@@ -116,12 +126,16 @@ class CrossAttention(nn.Module):
         k, v = kv[0], kv[1]
 
         attn: torch.Tensor = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)  # [Batch_size, num_heads, N_t, N_i]
 
-        x = attn @ v  # [Batch_size, num_heads, N_t, d_k]
+        if cross_attn_mask is not None:
+            attn = attn.masked_fill(cross_attn_mask == 0, float("-inf"))
+
+        attn = attn.softmax(dim=-1)  # [Batch_size, num_heads, N_t, N_i]
         x = self.attn_drop(x)
+        x = attn @ v  # [Batch_size, num_heads, N_t, d_k]
         x = x.transpose(1, 2).reshape(B, Nt, C)
         x = self.prj(x)
+        x = self.prj_drop(x)
         return x
 
 
@@ -156,4 +170,50 @@ class EncoderBlock(nn.Module):
     def forward(self, x):
         x = x + self.drop_path(self.attn(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class DecoderBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads,
+        mlp_ratio=4.0,
+        qkv_bias=False,
+        attn_dropout=0.0,
+        dropout=0.0,
+        drop_path=0.0,
+    ):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.causual_attn = CausualAttention(
+            dim=dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            attn_dropout=attn_dropout,
+            prj_dropout=dropout,
+        )
+        self.norm2 = nn.LayerNorm(dim)
+        self.cross_attn = CrossAttention(
+            dim=dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            attn_drop=attn_dropout,
+            prj_drop=dropout,
+        )
+        self.drop_path = DropPath(drop_prob=drop_path)
+        self.norm3 = nn.LayerNorm(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = MLP(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            out_features=dim,
+            drop_out=dropout,
+        )
+
+    def forward(self, x: torch.Tensor, encoder_hidden_state: torch.Tensor):
+        x = x + self.drop_path(self.causual_attn(self.norm1(x)))
+        x = x + self.drop_path(self.cross_attn(self.norm2(x), encoder_hidden_state))
+        x = x + self.drop_path(self.mlp(self.norm3(x)))
+
         return x
