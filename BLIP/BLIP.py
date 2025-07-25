@@ -28,11 +28,11 @@ class BLIP(nn.Module):
 
         self.itm_head = nn.Linear(embed_dim, 2)
 
-    def _forward_image_text_contrastive(self, image, text_input_ids):
+    def _forward_image_text_contrastive(self, text_input_ids, image):
         image_embeds = self.image_encoder(image)
         text_embeds = self.text_encoder(text_input_ids)
         image_feat = F.normalize(self.vision_prj(image_embeds[:, 0, :]), dim=-1)
-        text_feat = F.normalize(self.vision_prj(text_embeds[:, 0, :]), dim=-1)
+        text_feat = F.normalize(self.text_prj(text_embeds[:, 0, :]), dim=-1)
 
         return image_feat, text_feat
 
@@ -45,15 +45,15 @@ class BLIP(nn.Module):
 
     def _forward_language_model(self, text_input_ids, image):
         image_embed = self.image_encoder(image)
-        caption_logits = self.ground_decoder(text_input_ids, image)
+        caption_logits = self.ground_decoder(text_input_ids, image_embed)
         return caption_logits
 
     def forward(self, text_input_ids, image, mode="contrastive"):
         if mode == "contrastive":
             return self._forward_image_text_contrastive(text_input_ids, image)
         elif mode == "matching":
-            return self._forward_image_text_contrastive(text_input_ids, image)
+            return self._forward_image_text_matching(text_input_ids, image)
         elif mode == "generation":
-            return self._forward_image_text_contrastive(text_input_ids, image)
+            return self._forward_language_model(text_input_ids, image)
         else:
             raise ValueError("mode must be 'contrastive', 'matching', or 'generation'")

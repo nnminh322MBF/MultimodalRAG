@@ -31,7 +31,7 @@ class ImageEncoder(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.pos_drop = nn.Dropout(drop_rate)
-        drp = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+        stochastic_drop_path = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
         self.blocks = nn.ModuleList(
             [
                 EncoderBlock(
@@ -41,7 +41,7 @@ class ImageEncoder(nn.Module):
                     qkv_bias=qkv_bias,
                     attn_dropout=attn_drop_rate,
                     dropout=drop_rate,
-                    drop_path=drp[i],
+                    drop_path=stochastic_drop_path[i],
                 )
                 for i in range(depth)
             ]
@@ -69,9 +69,9 @@ class ImageEncoder(nn.Module):
         B = x.shape[0]
         x = self.patch_embed(x)  # [B, embed_dim, H/ph, W/pw]
         x = x.flatten(2).transpose(1, 2)  # [B, C, embed_dim]
-        self.cls_token = self.cls_token.expand(B, -1, -1)
+        cls_token = self.cls_token.expand(B, -1, -1)
 
-        x = torch.concatenate([self.cls_token, x], dim=1)
+        x = torch.concatenate([cls_token, x], dim=1)
         x = x + self.pos_embed
         x = self.pos_drop(x)
 

@@ -21,7 +21,7 @@ class ImageGroundedTextEncoder(nn.Module):
         super().__init__()
 
         self.word_embeddings = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.possition_embeddings = nn.Parameter(
+        self.position_embeddings = nn.Parameter(
             torch.zeros(1, max_position_embeddings, embed_dim)
         )
         self.pos_drop = nn.Dropout(drop_rate)
@@ -30,7 +30,7 @@ class ImageGroundedTextEncoder(nn.Module):
             x.item() for x in torch.linspace(0, drop_path_rate, depth)
         ]
 
-        self.blocks = nn.ModuleDict(
+        self.blocks = nn.ModuleList(
             [
                 EncoderBlock(
                     dim=embed_dim,
@@ -50,7 +50,7 @@ class ImageGroundedTextEncoder(nn.Module):
         nn.init.trunc_normal_(self.possition_embeddings)
         self.apply(self._init_weights)
         self.cross_idx = set(range(0, depth, cross_attention_interval))
-        self.cross_attn = nn.ModuleList(
+        self.cross_attn = nn.ModuleDict(
             {
                 str(i): CrossAttention(
                     dim=embed_dim,

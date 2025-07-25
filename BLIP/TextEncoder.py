@@ -17,7 +17,7 @@ class TextEncoder(nn.Module):
         drop_path_rate: float = 0.0,
     ):
         super().__init__()
-        self.word_embeddings = nn.Parameter(vocab_size, embed_dim)
+        self.word_embeddings = nn.Embedding(vocab_size, embed_dim)
         self.position_embeddings = nn.Parameter(torch.zeros(1, max_len, embed_dim))
         self.drop = nn.Dropout(drop_rate)
 

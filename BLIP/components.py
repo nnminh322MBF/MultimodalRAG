@@ -71,7 +71,7 @@ class SelfAttention(nn.Module):
 
         attn = attn.softmax(dim=-1)
 
-        x = self.attn_drop(x)
+        attn = self.attn_drop(attn)
 
         x = (
             (attn @ v).transpose(1, 2).reshape(B, N, C)
@@ -104,22 +104,22 @@ class CrossAttention(nn.Module):
         self.prj_drop = nn.Dropout(prj_drop)
 
     def forward(
-        self, a_feature: torch.Tensor, b_feature: torch.Tensor, cross_attn_mask=None
+        self, query: torch.Tensor, context: torch.Tensor, cross_attn_mask=None
     ):
         """
         input:
-        - a_feature: image_feature
-        - b_feature: text_feature
+        - context: image_feature
+        - query: text_feature
         """
-        _, Ni, _ = a_feature.shape
-        B, Nt, C = b_feature.shape
+        _, Ni, _ = context.shape
+        B, Nt, C = query.shape
 
-        q: torch.Tensor = self.q(b_feature)  # [Batch_size, Nt, dim]
+        q: torch.Tensor = self.q(query)  # [Batch_size, Nt, dim]
         q = q.reshape(B, Nt, 1, self.num_heads, C // self.num_heads).permute(
             2, 0, 3, 1, 4
         )  # [1, Batch_size, num_heads, N_t, d_k]
 
-        kv: torch.Tensor = self.kv(a_feature)
+        kv: torch.Tensor = self.kv(context)
         kv = kv.reshape(B, Ni, 2, self.num_heads, C // self.num_heads).permute(
             2, 0, 3, 1, 4
         )  # [2, Batch_size, num_heads, N_i, d_k]
@@ -131,7 +131,7 @@ class CrossAttention(nn.Module):
             attn = attn.masked_fill(cross_attn_mask == 0, float("-inf"))
 
         attn = attn.softmax(dim=-1)  # [Batch_size, num_heads, N_t, N_i]
-        x = self.attn_drop(x)
+        attn = self.attn_drop(attn)
         x = attn @ v  # [Batch_size, num_heads, N_t, d_k]
         x = x.transpose(1, 2).reshape(B, Nt, C)
         x = self.prj(x)
