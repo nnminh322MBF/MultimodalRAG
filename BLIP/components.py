@@ -83,7 +83,7 @@ class SelfAttention(nn.Module):
         return x
 
 
-class CausualAttention(SelfAttention):
+class CausalAttention(SelfAttention):
     def forward(self, x, attn_mask=None):
         B, N, C = x.shape
         causual_mask = torch.tril(torch.ones(N, N, dtype=x.dtype, device=x.device))
@@ -186,7 +186,7 @@ class DecoderBlock(nn.Module):
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.causual_attn = CausualAttention(
+        self.causual_attn = CausalAttention(
             dim=dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
